@@ -1,0 +1,109 @@
+services:
+  # Isolated PostgreSQL Database for Auth Service
+  postgres_auth:
+    image: postgres:15-alpine
+    container_name: postgres_auth_db
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: auth_user
+      POSTGRES_PASSWORD: auth_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_auth_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U auth_user -d auth_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - microservices_network
+
+  # Isolated PostgreSQL Database for Inventory Service
+  postgres_inventory:
+    image: postgres:15-alpine
+    container_name: postgres_inv_db
+    environment:
+      POSTGRES_DB: inventory_db
+      POSTGRES_USER: inv_user
+      POSTGRES_PASSWORD: inv_secure_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_inv_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inv_user -d inventory_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - microservices_network
+
+  # Redis In-Memory Cache Instance
+  redis_cache:
+    image: redis:7-alpine
+    container_name: redis_cache_service
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_cache_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    networks:
+      - microservices_network
+
+  # Auth Microservice
+  auth_service:
+    build:
+      context: ..
+      dockerfile: Day21_Testing_and_Docker/auth_service/Dockerfile
+    container_name: auth_microservice
+    ports:
+      - "8001:8001"
+    environment:
+      - DATABASE_URL=postgresql://auth_user:auth_secure_password@postgres_auth:5432/auth_db
+      - JWT_SECRET=super-secret-key-week4-microservices
+      - PORT=8001
+    depends_on:
+      postgres_auth:
+        condition: service_healthy
+    networks:
+      - microservices_network
+
+  # Inventory Microservice
+  inventory_service:
+    build:
+      context: ..
+      dockerfile: Day21_Testing_and_Docker/inventory_service/Dockerfile
+    container_name: inventory_microservice
+    ports:
+      - "8002:8002"
+    environment:
+      - DATABASE_URL=postgresql://inv_user:inv_secure_password@postgres_inventory:5432/inventory_db
+      - AUTH_SERVICE_URL=http://auth_service:8001
+      - REDIS_HOST=redis_cache
+      - REDIS_PORT=6379
+      - PORT=8002
+    depends_on:
+      postgres_inventory:
+        condition: service_healthy
+      redis_cache:
+        condition: service_healthy
+      auth_service:
+        condition: service_started
+    networks:
+      - microservices_network
+
+networks:
+  microservices_network:
+    driver: bridge
+
+volumes:
+  postgres_auth_data:
+  postgres_inv_data:
+  redis_cache_data:
+
